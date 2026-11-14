@@ -154,7 +154,7 @@ def run_apply(stream_id: int) -> dict[str, Any]:
             # decision == apply
             if frozen:
                 # 冻结策略：本批拟应用事件一律不写 Sink、不抬游标、不记 applied_seqs，
-                # 仅留账本与违约票，保证游标不高于已提交水位。
+                # 仅留账本；并只为超阈事件开违约票，保证游标不高于已提交水位。
                 ledger_repo.insert_ledger(
                     conn,
                     stream_id=stream_id,
@@ -162,21 +162,7 @@ def run_apply(stream_id: int) -> dict[str, Any]:
                     event=event,
                     disposition="lag_frozen",
                 )
-                if event["op"] == "upsert":
-                    sink_repo.upsert(
-                        conn,
-                        stream_id=stream_id,
-                        entity_key=event["entity_key"],
-                        payload=event.get("payload") or {},
-                        seq=int(event["seq"]),
-                        event_ts=event["event_ts"],
-                    )
-                else:
-                    sink_repo.delete(conn, stream_id=stream_id, entity_key=event["entity_key"])
-                cursor_repo.mark_applied(conn, stream_id, int(event["seq"]), run_id)
-                cursor = int(event["seq"])
-                streams_repo.set_cursor(conn, stream_id, cursor)
-                if not item["over_threshold"]:
+                if item["over_threshold"]:
                     lag_repo.insert_ticket(
                         conn,
                         run_id=run_id,

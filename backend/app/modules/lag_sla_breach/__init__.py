@@ -94,5 +94,5 @@ def decide_action(*, over_threshold_count: int, policy: str) -> str:
     if over_threshold_count <= 0:
         return "advance_ok"
     if policy == POLICY_TICKET:
-        return "advance_ok"
+        return POLICY_TICKET
     return "freeze_cursor"

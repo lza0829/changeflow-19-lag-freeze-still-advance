@@ -119,6 +119,21 @@ def test_freeze_policy_blocks_cursor_and_writes_tickets():
         assert sorted(t["seq"] for t in tickets) == [2, 5]
         assert all(t["action"] == "freeze_cursor" for t in tickets)
 
+        # 冻结互证：Sink 零增量、applied_seqs 零记录、账本全为 lag_frozen
+        sink_rows = conn.execute(
+            "SELECT COUNT(*) c FROM sink_records WHERE stream_id=?", (stream_id,)
+        ).fetchone()["c"]
+        applied_rows = conn.execute(
+            "SELECT COUNT(*) c FROM applied_seqs WHERE stream_id=?", (stream_id,)
+        ).fetchone()["c"]
+        frozen_ledger = conn.execute(
+            "SELECT COUNT(*) c FROM change_ledger WHERE run_id=? AND disposition='lag_frozen'",
+            (run["id"],),
+        ).fetchone()["c"]
+        assert sink_rows == 0
+        assert applied_rows == 0
+        assert frozen_ledger == 6
+
         # 游标页能看到冻结标记
         view = {r["stream_id"]: r for r in cursor_repo.list_cursor_view(conn)}
         assert view[stream_id]["lag_frozen"] is True
@@ -159,7 +174,24 @@ def test_ticket_policy_advances_cursor_and_keeps_tickets():
 
         tickets = lag_repo.list_tickets(conn, run_id=run["id"])
         assert len(tickets) == 2
+        assert sorted(t["seq"] for t in tickets) == [2, 5]
         assert all(t["action"] == "ticket_and_advance" for t in tickets)
+
+        # 记票放行互证：Sink/applied_seqs/账本均按 6 条落地，票只对应超阈事件
+        sink_rows = conn.execute(
+            "SELECT COUNT(*) c FROM sink_records WHERE stream_id=?", (stream_id,)
+        ).fetchone()["c"]
+        applied_rows = conn.execute(
+            "SELECT COUNT(*) c FROM applied_seqs WHERE stream_id=?", (stream_id,)
+        ).fetchone()["c"]
+        applied_ledger = conn.execute(
+            "SELECT COUNT(*) c FROM change_ledger WHERE run_id=? AND disposition='applied'",
+            (run["id"],),
+        ).fetchone()["c"]
+        assert sink_rows == 6
+        assert applied_rows == 6
+        assert applied_ledger == 6
+        assert {t["seq"] for t in tickets} == set(lag["over_threshold_seqs"])
 
         view = {r["stream_id"]: r for r in cursor_repo.list_cursor_view(conn)}
         assert view[stream_id]["lag_frozen"] is False
